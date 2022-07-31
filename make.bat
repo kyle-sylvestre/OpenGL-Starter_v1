@@ -1,4 +1,9 @@
 @echo off
+
+if "%INCLUDE%"=="" (
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\Common7\Tools\VsDevCmd.bat"
+)
+
 subst w: . > NUL 2>&1
 set EXE=w:\output\app.exe
 set SRC=w:\src\3DSage_Starter.cpp
@@ -13,7 +18,6 @@ if "%1"=="clean" (
 ) 
 
 if "%1"=="" (
-    call dev.bat
 
     if not exist w:\intermediate mkdir w:\intermediate
     if not exist w:\output mkdir w:\output
@@ -22,7 +26,7 @@ if "%1"=="" (
         msbuild w:\glut\glut_2010.vcxproj /p:Configuration=Debug /p:Platform=X86 /m
     )
     pushd intermediate
-    cl -MP -Zi %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
+    cl -MP -Zi -Od %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
     popd
 )
 
@@ -33,3 +37,4 @@ if "%1"=="debug" (
     devenv.exe output\app.exe
 ) 
 
+subst w: /D
