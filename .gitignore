@@ -8,5 +8,6 @@
 *.log
 *.lib
 *.db
+*.opendb
 *.ipch
 tags

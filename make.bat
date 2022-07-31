@@ -26,7 +26,7 @@ if "%1"=="" (
         msbuild w:\glut\glut_2010.vcxproj /p:Configuration=Debug /p:Platform=X86 /m
     )
     pushd intermediate
-    cl -MP -Zi -Od %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
+    cl -W4 -MP -Zi -Od %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
     popd
 )
 
@@ -36,5 +36,9 @@ if "%1"=="debug" (
     call dev.bat
     devenv.exe output\app.exe
 ) 
+
+if "%1"=="tags" (
+    ctags.exe -R --exclude=*.tex --c++-kinds=+p --fields=+iaS --extras=+q
+)
 
 subst w: /D
