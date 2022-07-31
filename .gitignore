@@ -1,0 +1,12 @@
+*.obj
+*.exe
+*.ilk
+*.pdb
+*.sui
+*.suo
+*.tlog
+*.log
+*.lib
+*.db
+*.ipch
+tags
