@@ -1,4 +1,0 @@
-7/30/22 
-O build glut as a static lib 
-    #define GLUT_BUILDING_LIBS for making static library
-    this library feels janky, how hard would it be to do from scratch?
