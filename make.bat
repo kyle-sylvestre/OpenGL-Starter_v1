@@ -5,15 +5,17 @@ if "%INCLUDE%"=="" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\Common7\Tools\VsDevCmd.bat"
 )
 
-subst w: . > NUL 2>&1
+rem clear old w: and set it to this batch file's directory
+subst w: /D >NUL 2>&1
+subst w: "%~dp0"
+
 set EXE=w:\output\app.exe
-set SRC=w:\src\3DSage_Starter.cpp
+set SRC=w:\src\main.cpp
 set LIBS=winmm.lib user32.lib gdi32.lib opengl32.lib glu32.lib w:\glut\Win32_2010\Debug\glutstatic.lib 
-set err=0
 
 if "%1"=="clean" (
-    del .\intermediate\* /Q
-    del .\output\* /Q
+    rmdir /s /q w:\intermediate
+    rmdir /s /q w:\output
     if "%2"=="all" (
         msbuild w:\glut\glut_2010.vcxproj /t:clean /p:Configuration=Debug /p:Platform=X86
     )
@@ -29,7 +31,7 @@ if "%1"=="" (
     )
 
     rem delete exe bc you don't shortcircuit in "make && output.exe"
-    del %EXE%
+    del %EXE% 2>NUL
 
     pushd intermediate
     cl.exe -W4 -MP -Zi -Od %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
@@ -40,7 +42,7 @@ if "%1"=="debug" (
     rem for /F "tokens=1,2" %%i in ('tasklist /FI "IMAGENAME eq %EXE%" /fo table /nh') do set pid=%%j
     rem echo %pid%
     call dev.bat
-    devenv.exe output\app.exe
+    devenv.exe %EXE%
 ) 
 
 if "%1"=="tags" (

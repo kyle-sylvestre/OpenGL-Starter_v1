@@ -37,16 +37,19 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <glut.h>
 #include <Windows.h>
 #include "Load_Levels.txt"
+typedef unsigned int uint;
 #undef min
 #undef max
 
 #define ArrayCount(a) (sizeof(a) / sizeof((a)[0]))
-#define PrintErrorf(fmt, ...) do { fprintf(stderr, fmt, __VA_ARGS__); DebugBreak(); }while(0)
-#define Assert(cond) if (!(cond)) PrintErrorf("assertion failed: %s\n", #cond)
+#define PrintErrorf(fmt, ...) do { fprintf(stderr, "%s line %d: " fmt, __FUNCTION__, __LINE__, __VA_ARGS__); DebugBreak(); }while(0)
+#define Assert(cond) if (!(cond)) PrintErrorf("assertion failed \"%s\"\n", #cond)
 #define Coerce(x, min, max) (x < min) ? min : (x > max) ? max : x;
+#define Malloc(type, count) (type *)malloc(count * sizeof(type))
 
 // opengl version >= 4.3 definitions
 #define GL_DEBUG_OUTPUT_SYNCHRONOUS 0x8242
@@ -83,10 +86,10 @@
 #define GLSH       (SH*PIXELSCALE)          // OpenGL window height
 #define FRAMERATE  20
 #define PI32       3.14159265359f
-#define MAX_WALLS        100
-#define MAX_SECTORS      100
-#define INTS_PER_SECTOR   6                   // how many ints per stored sector
-#define INTS_PER_WALL     5                   // how many ints per stored wall
+#define MAX_WALLS        512
+#define MAX_SECTORS      512
+#define INTS_PER_SECTOR   6                 // how many ints per stored sector
+#define INTS_PER_WALL     5                 // how many ints per stored wall
 
 //------------------------------------------------------------------------------
 struct Time
@@ -124,12 +127,12 @@ struct Wall
 {
     V2 p1;          // bottom line point 1
     V2 p2;          // bottom line point 2
-    int c;          // color
+    uint c;         // color
 } walls[MAX_WALLS];
 
 struct Sector
 {
-    int ws, we;     // wall start index to end: [ws, we) 
+    uint ws, we;    // wall start index to end: [ws, we) 
     int z1, z2;     // height of bottom and top
     V2 p;           // center position of sector
     int d;          // add y distances to sort draw order
@@ -162,8 +165,6 @@ enum Color
     Color_Count,
 };
 
-//------------------------------------------------------------------------------
-
 const RGB COLORS[Color_Count] = {
    {255, 255,   0}, //Yellow	
    {160, 160,   0}, //Yellow darker	
@@ -180,12 +181,12 @@ Keys keys;
 Time time;
 Player p;
 Math m;
-int sector_count;
-int wall_count;
+uint sector_count;
+uint wall_count;
 
-void DrawPixel(int x, int y, int c)
+void DrawPixel(int x, int y, uint c)
 {
-    Assert(c >= 0 && c < Color_Count);
+    Assert(c < Color_Count);
 
     // don't draw any offscreen pixels 
     //if ((x < 0 || x > SW) ||
@@ -203,8 +204,8 @@ void DrawPixel(int x, int y, int c)
 void Move()
 {
     //move up, down, left, right
-    if (keys.a ==1 && keys.m==0){ p.a -= 4; if (p.a < 0)   p.a += 360; } // left
-    if (keys.d ==1 && keys.m==0){ p.a += 4; if (p.a > 359) p.a -= 360; } // right
+    if (keys.a ==1 && keys.m==0){ p.a -= 5; if (p.a < 0)   p.a += 360; } // left
+    if (keys.d ==1 && keys.m==0){ p.a += 5; if (p.a > 359) p.a -= 360; } // right
 
     int dx = m.sin[p.a] * 10.0;
     int dy = m.cos[p.a] * 10.0;
@@ -216,8 +217,8 @@ void Move()
     //move up, down, look up, look down
     if (keys.a==1 && keys.m==1){ p.l -= 1; } // look up
     if (keys.d==1 && keys.m==1){ p.l += 1; } // look down
-    if (keys.w==1 && keys.m==1){ p.z -= 4; } // move up
-    if (keys.s==1 && keys.m==1){ p.z += 4; } // move down
+    if (keys.w==1 && keys.m==1){ p.z -= 5; } // move up
+    if (keys.s==1 && keys.m==1){ p.z += 5; } // move down
 }
 
 void ClearBackground() 
@@ -286,82 +287,81 @@ void Draw3D()
     float CS = m.cos[p.a];
     float SN = m.sin[p.a];
 
-    // order sectors by distance
-    for (int si = 0; si < sector_count - 1; si++)
+    // sort sectors for furthest away gets drawn first
+    const auto SortDistanceDescending = [](const void *a, const void *b) -> int
     {
-        for (int i = 0; i < sector_count - si - 1; i++)
-        {
-            if (sectors[i].d < sectors[i + 1].d)
-            {
-                Sector tmp = sectors[i];
-                sectors[i] = sectors[i + 1];
-                sectors[i + 1] = tmp;
-            }
-        } 
-    }
+        return ((Sector *)b)->d - ((Sector *)a)->d;
+    };
 
-    for (int si = 0; si < sector_count; si++)
+    qsort(sectors, sector_count, sizeof(Sector), SortDistanceDescending);
+    for (uint si = 0; si < sector_count; si++)
     {
         Sector *sector = &sectors[si];
-        for (int wi = sector->ws; wi < sector->we; wi++)
+        for (uint side = 0; side < 2; side++)
         {
-            Assert(wi < wall_count);
-            Wall *wall = &walls[wi];
-            V3 w0, w1, w2, w3;
-            w0 = w1 = w2 = w3 = {};
-
-            // offset bottom 2 points by player
-            //int x1 = 40 - p.x; 
-            //int y1 = 10 - p.y;
-            //int x2 = 40 - p.x; 
-            //int y2 =290 - p.y;
-            int x1 = wall->p1.x - p.x; 
-            int y1 = wall->p1.y - p.y;
-            int x2 = wall->p2.x - p.x; 
-            int y2 = wall->p2.y - p.y;
-            int swp = x1; x1 = x2; x2 = swp; swp = y1; y1 = y2; y2 = swp;
-
-            // world x position
-            w0.x = x1 * CS - y1 * SN;
-            w1.x = x2 * CS - y2 * SN;
-            w2.x = w0.x;
-            w3.x = w1.x;
-
-            // world y position
-            w0.y = y1 * CS + x1 * SN;
-            w1.y = y2 * CS + x2 * SN;
-            w2.y = w0.y;
-            w3.y = w1.y;
-            sector->d += Distance( {0,0}, {(w0.x + w1.x) / 2, (w0.y + w1.y) / 2});
-
-            // world z height
-            w0.z = sector->z1 - p.z + ((p.l * w0.y) / 32.0f);
-            w1.z = sector->z1 - p.z + ((p.l * w1.y) / 32.0f);
-            w2.z = w0.z + sector->z2;
-            w3.z = w1.z + sector->z2;
-
-            if (w0.y < 1 && w1.y < 1) 
+            for (uint wi = sector->ws; wi < sector->we; wi++)
             {
-                continue; // wall behind player, skip
-            }
-            else if (w0.y < 1)
-            {
-                ClipBehindPlayer(&w0, &w1); // bottom line
-                ClipBehindPlayer(&w2, &w3); // top line
-            }
-            else if (w1.y < 1)
-            {
-                ClipBehindPlayer(&w1, &w0); // bottom line
-                ClipBehindPlayer(&w3, &w2); // top line
-            }
+                Assert(wi < wall_count);
+                Wall *wall = &walls[wi];
+                V3 w0, w1, w2, w3;
+                w0 = w1 = w2 = w3 = {};
 
-            // screen x and screen y
-            w0.x=w0.x*200/w0.y+SW2; w0.y=w0.z*200/w0.y+SH2;
-            w1.x=w1.x*200/w1.y+SW2; w1.y=w1.z*200/w1.y+SH2;
-            w2.x=w2.x*200/w2.y+SW2; w2.y=w2.z*200/w2.y+SH2;
-            w3.x=w3.x*200/w3.y+SW2; w3.y=w3.z*200/w3.y+SH2;
+                // offset bottom 2 points by player
+                int x1 = wall->p1.x - p.x; 
+                int y1 = wall->p1.y - p.y;
+                int x2 = wall->p2.x - p.x; 
+                int y2 = wall->p2.y - p.y;
 
-            DrawWall(w0.x, w1.x, w0.y, w1.y, w2.y, w3.y, wall->c);
+                // reorder points to draw the culled back face
+                if (side == 0)
+                {
+                    int swp = 0;
+                    swp = x1; x1 = x2; x2 = swp; 
+                    swp = y1; y1 = y2; y2 = swp;
+                }
+
+                // world x position
+                w0.x = x1 * CS - y1 * SN;
+                w1.x = x2 * CS - y2 * SN;
+                w2.x = w0.x;
+                w3.x = w1.x;
+
+                // world y position
+                w0.y = y1 * CS + x1 * SN;
+                w1.y = y2 * CS + x2 * SN;
+                w2.y = w0.y;
+                w3.y = w1.y;
+                sector->d += Distance( {0,0}, {(w0.x + w1.x) / 2, (w0.y + w1.y) / 2});
+
+                // world z height
+                w0.z = sector->z1 - p.z + ((p.l * w0.y) / 32.0f);
+                w1.z = sector->z1 - p.z + ((p.l * w1.y) / 32.0f);
+                w2.z = w0.z + sector->z2;
+                w3.z = w1.z + sector->z2;
+
+                if (w0.y < 1 && w1.y < 1) 
+                {
+                    continue; // wall behind player, skip
+                }
+                else if (w0.y < 1)
+                {
+                    ClipBehindPlayer(&w0, &w1); // bottom line
+                    ClipBehindPlayer(&w2, &w3); // top line
+                }
+                else if (w1.y < 1)
+                {
+                    ClipBehindPlayer(&w1, &w0); // bottom line
+                    ClipBehindPlayer(&w3, &w2); // top line
+                }
+
+                // screen x and screen y
+                w0.x=w0.x*200/w0.y+SW2; w0.y=w0.z*200/w0.y+SH2;
+                w1.x=w1.x*200/w1.y+SW2; w1.y=w1.z*200/w1.y+SH2;
+                w2.x=w2.x*200/w2.y+SW2; w2.y=w2.z*200/w2.y+SH2;
+                w3.x=w3.x*200/w3.y+SW2; w3.y=w3.z*200/w3.y+SH2;
+
+                DrawWall(w0.x, w1.x, w0.y, w1.y, w2.y, w3.y, wall->c);
+            }
         }
 
         sector->d /= (sector->we - sector->ws);
@@ -503,7 +503,7 @@ void *GetProc(const char *name)
 
 int main(int argc, char* argv[])
 {
-    const auto exit_callback = [](int code)
+    const auto ExitCallback = [](int code)
     {
         if (code == EXIT_FAILURE) 
             DebugBreak(); 
@@ -511,7 +511,7 @@ int main(int argc, char* argv[])
         exit(code);
     };
 
-    __glutInitWithExit(&argc, argv, exit_callback);
+    __glutInitWithExit(&argc, argv, ExitCallback);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowPosition(GLSW/2,GLSH/2);
     glutInitWindowSize(GLSW,GLSH);
@@ -534,19 +534,19 @@ int main(int argc, char* argv[])
         p.a = 0;
         p.l = 0;
 
-        int *sec            = loadSectors_1;
-        int sec_int_count   = ArrayCount(loadSectors_1);
-        int *wall           = loadWalls_1;
-        int wall_int_count  = ArrayCount(loadWalls_1);
+        int *sec            = loadSectors;
+        uint sec_int_count  = ArrayCount(loadSectors);
+        int *wall           = loadWalls;
+        uint wall_int_count = ArrayCount(loadWalls);
 
         // load in sectors
         Assert(sec_int_count % INTS_PER_SECTOR == 0);
-        for (int i = 0; i < sec_int_count; i += INTS_PER_SECTOR)
+        for (uint i = 0; i < sec_int_count; i += INTS_PER_SECTOR)
         {
             if (sector_count >= MAX_SECTORS)
             {
                 PrintErrorf("exceeded sector capacity\n");
-                exit(EXIT_FAILURE);
+                exit(1);
             }
 
             Sector *s = &sectors[sector_count++];
@@ -561,18 +561,18 @@ int main(int argc, char* argv[])
             if (!good_sector)
             {
                 PrintErrorf("bad sector at index: %d\n", i / INTS_PER_SECTOR);
-                exit(EXIT_FAILURE);
+                exit(1);
             }
         }
 
         // load in walls
         Assert(wall_int_count % INTS_PER_WALL == 0);
-        for (int i = 0; i < wall_int_count; i += INTS_PER_WALL)
+        for (uint i = 0; i < wall_int_count; i += INTS_PER_WALL)
         {
             if (wall_count >= MAX_WALLS)
             {
                 PrintErrorf("exceeded wall capacity\n");
-                exit(EXIT_FAILURE);
+                exit(1);
             }
 
             Wall *w = &walls[wall_count++];
@@ -586,33 +586,37 @@ int main(int argc, char* argv[])
             if (!good_wall)
             {
                 PrintErrorf("bad wall at index: %d\n", i / INTS_PER_WALL);
-                exit(EXIT_FAILURE);
+                exit(1);
             }
         }
 
-        // placeholder for missing wall/sectors at part 1 18:35
         sector_count = 0;
         wall_count = 0;
-        const auto PushSector = [&](V2 st, int c)
+        const int DIM = 64;     // floor square width/height
+        const auto PushBoxSector = [&](V2 st, int c, int h)
         {
-            V2 pts[4] = {
-                {st.x,       st.y},
-                {st.x + 32,  st.y},
-                {st.x + 32,  st.y + 32},
-                {st.x,       st.y + 32},
+            // add a sector with 4 walls
+            V2 pts[4] = 
+            {
+                {st.x,        st.y      },
+                {st.x + DIM,  st.y      },
+                {st.x + DIM,  st.y + DIM},
+                {st.x,        st.y + DIM},
             };
 
+            Assert(wall_count + 4 <= MAX_WALLS);
             Wall *w = &walls[wall_count];
             w[0].p1 = pts[0]; w[0].p2 = pts[1]; w[0].c = c;
-            w[1].p1 = pts[1]; w[1].p2 = pts[2]; w[1].c = c + 1;
+            w[1].p1 = pts[1]; w[1].p2 = pts[2]; w[1].c = c;
             w[2].p1 = pts[2]; w[2].p2 = pts[3]; w[2].c = c;
-            w[3].p1 = pts[3]; w[3].p2 = pts[0]; w[3].c = c + 1;
+            w[3].p1 = pts[3]; w[3].p2 = pts[0]; w[3].c = c;
 
+            Assert(sector_count + 1 <= MAX_SECTORS);
             Sector *s = &sectors[sector_count];
             s->ws = wall_count;
             s->we = s->ws + 4;
             s->z1 = 0;
-            s->z2 = 40;
+            s->z2 = h;
             s->p = {};  //unused
             s->d = 0;
 
@@ -620,11 +624,53 @@ int main(int argc, char* argv[])
             wall_count += 4;
         };
 
-        PushSector({0, 0}, 0);
-        PushSector({64,0}, 2);
-        PushSector({64,64}, 4);
-        PushSector({0, 64}, 6);
+        // create sectors from a string definition
+        // any non-space character is a wall for now
+        // top left is (0,0), down is +y, right is +x
+        const char *maze = 
+        "#######"
+        "   #   "
+        "#  #  #"
+        "#     #"
+        "#######";
+        const int COLUMN_COUNT = 7;
+        const int ROW_COUNT = strlen(maze) / COLUMN_COUNT;
+        for (int r = 0; r < ROW_COUNT; r++)
+        {
+            for (int c = 0; c < COLUMN_COUNT; c++)
+            {
+                int i = r * COLUMN_COUNT + c;
+                if (' ' != maze[i])
+                {
+                    V2 point = { c * DIM, r * DIM };
+                    PushBoxSector(point, i % Color_Background, 40);
+                }
+            }
+        }
 
+#if 0
+        // placeholder for missing wall/sectors at part 1 18:35
+        FILE *f = fopen("missing.txt", "wb");
+        fprintf(f, "int loadSectors[]=\n{\n");
+        for (uint i = 0; i < sector_count; i++)
+        {
+            Sector *s = &sectors[i];
+            fprintf(f, "%d,%d, %d,%d, %d,%d,\n", 
+                    s->ws, s->we, s->z1, s->z2, s->p.x, s->p.y);
+        }
+        fprintf(f, "};\n\n");
+
+        fprintf(f, "int loadWalls[]=\n{\n");
+        for (uint i = 0; i < wall_count; i++)
+        {
+            Wall *w = &walls[i];
+            fprintf(f, "%d,%d, %d,%d, %d,\n",
+                    w->p1.x, w->p1.y, w->p2.x, w->p2.y, w->c);
+
+        }
+        fprintf(f, "};\n\n");
+        fclose(f); f = NULL;
+#endif
     }
 
     // enable debug function for opengl 4.3 and higher
@@ -668,5 +714,5 @@ int main(int argc, char* argv[])
     //glutMotionFunc();             // mouse motion while 1 or more buttons down
     //glutPassiveMotionFunc();      // mouse motion while no buttons down
     glutMainLoop();
-    return EXIT_SUCCESS;
+    return 0;
 } 
