@@ -5,37 +5,33 @@ if "%INCLUDE%"=="" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\Common7\Tools\VsDevCmd.bat"
 )
 
-rem clear old w: and set it to this batch file's directory
-subst w: /D >NUL 2>&1
-subst w: "%~dp0"
-
-set EXE=w:\output\app.exe
-set SRC=w:\src\main.cpp
-set LIBS=winmm.lib user32.lib gdi32.lib opengl32.lib glu32.lib w:\glut\Win32_2010\Debug\glutstatic.lib 
+rem push old cwd and set it to the batch file's directory 
+pushd "%~dp0"
+set EXE=output\app.exe
+set SRC=src\main.cpp
+set LIBS=winmm.lib user32.lib gdi32.lib opengl32.lib glu32.lib glut\Win32_2010\Debug\glutstatic.lib 
 
 if "%1"=="clean" (
-    rmdir /s /q w:\intermediate
-    rmdir /s /q w:\output
+    rmdir /s /q intermediate
+    rmdir /s /q output
     if "%2"=="all" (
-        msbuild w:\glut\glut_2010.vcxproj /t:clean /p:Configuration=Debug /p:Platform=X86
+        msbuild glut\glut_2010.vcxproj /t:clean /p:Configuration=Debug /p:Platform=X86
     )
 ) 
 
 if "%1"=="" (
 
-    if not exist w:\intermediate mkdir w:\intermediate
-    if not exist w:\output mkdir w:\output
-    if not exist "w:\glut\Win32_2010\Debug\glutstatic.lib" (
+    if not exist intermediate mkdir intermediate
+    if not exist output mkdir output
+    if not exist "glut\Win32_2010\Debug\glutstatic.lib" (
         rem TODO: how to /DGLUT_BUILDING_LIB in the command line
-        msbuild.exe w:\glut\glut_2010.vcxproj /p:Configuration=Debug /p:Platform=X86 /m
+        msbuild.exe glut\glut_2010.vcxproj /p:Configuration=Debug /p:Platform=X86 /m
     )
 
     rem delete exe bc you don't shortcircuit in "make && output.exe"
     del %EXE% 2>NUL
 
-    pushd intermediate
-    cl.exe -W4 -MP -Zi -Od %SRC% -Iw:\glut\include\GL -Fe"%EXE%" -link %LIBS%
-    popd
+    cl.exe -W4 -MP -Zi -Od %SRC% -Iglut\include\GL -Fo".\intermediate\\" -Fe"%EXE%" -link %LIBS%
 )
 
 if "%1"=="debug" (
@@ -49,4 +45,5 @@ if "%1"=="tags" (
     ctags.exe -R --exclude=*.tex --c++-kinds=+p --fields=+iaS --extras=+q
 )
 
-subst w: /D
+rem restore from the cwd stack
+popd
