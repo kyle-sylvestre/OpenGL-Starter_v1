@@ -2,6 +2,35 @@
 //Here are some of the arrays that I showed in the video. Make sure 
 //to updated the number of wall and sector arrays from 30 to maybe 100.
 
+// 4 boxes missing from original file
+int loadSectors[]=
+{
+0,4, 0,40, 0,0,
+4,8, 0,40, 0,0,
+8,12, 0,40, 0,0,
+12,16, 0,40, 0,0,
+};
+
+int loadWalls[]=
+{
+0,0, 32,0, 0,
+32,0, 32,32, 1,
+32,32, 0,32, 0,
+0,32, 0,0, 1,
+64,0, 96,0, 2,
+96,0, 96,32, 3,
+96,32, 64,32, 2,
+64,32, 64,0, 3,
+64,64, 96,64, 4,
+96,64, 96,96, 5,
+96,96, 64,96, 4,
+64,96, 64,64, 5,
+0,64, 32,64, 6,
+32,64, 32,96, 7,
+32,96, 0,96, 6,
+0,96, 0,64, 7,
+};
+
 //---4 leg table---
 int loadSectors_1[]=
 {
