@@ -31,7 +31,7 @@ if "%1"=="" (
     rem delete exe bc you don't shortcircuit in "make && output.exe"
     del %EXE% 2>NUL
 
-    cl.exe -W4 -MP -Zi -Od %SRC% -Iglut\include\GL -Fo".\intermediate\\" -Fe"%EXE%" -link %LIBS%
+    cl.exe -W4 -MP -Zi -Od %SRC% -Iglut\include\GL -Fd.\intermediate\ -Fo.\intermediate\ -Fe%EXE% -link %LIBS%
 )
 
 if "%1"=="debug" (
