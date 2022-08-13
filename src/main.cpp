@@ -2,79 +2,25 @@
 //--------------------------Code By: 3DSage-------------------------------------
 //----------------Video tutorial on YouTube-3DSage------------------------------
 //------------------------------------------------------------------------------
-#pragma warning(disable:4996)   // This function or variable may be unsafe
-#pragma warning(disable:4505)   // unreferenced function removed
-#pragma warning(disable:4702)   // unreachable code
-#pragma warning(disable:4127)   // conditional expression is constant
-#pragma warning(disable:4189)   // local variable is initialized but not referenced
-#pragma warning(disable:4706)   // assignment within conditional expression
-#pragma warning(disable:4100)   // unreferenced formal parameter
 
-#pragma warning(error:4717)     // recursive on all control paths
-#pragma warning(error:4293)     // '<<': shift count negative or too big
-#pragma warning(error:4715)     // not all code paths return a value
-#pragma warning(error:4701)     // potentially uninitialized local variable
-#pragma warning(error:4309)     // truncation of constant value
-#pragma warning(error:4002)     // too many arguments for function-like macro
-#pragma warning(error:4456)     // declaration of 'foo' hides previous local declaration
-#pragma warning(error:4457)     // declaration of 'foo' hides function parameter
-#pragma warning(error:4458)     // declaration of 'foo' hides class member
-#pragma warning(error:4459)     // declaration of 'foo' hides global declaration
-
-// printf family warnings
-#pragma warning(error:4473)     // not enough arguments for format string
-#pragma warning(error:4474)     // too many arguments for format string
-#pragma warning(error:4475)     // format string length modifier invalid for type field character
-#pragma warning(error:4476)     // unknown type field character
-#pragma warning(error:4477)     // format string type mismatch
-#pragma warning(error:4478)     // positional and non-positional placeholders cannot be mixed in the same format string
-#pragma warning(error:4774)     // format string not a string literal
-#pragma warning(error:4775)     // nonstandard extension used in format string
-#pragma warning(error:4776)     // %<conversion-specifier> is not allowed in the format string
-#pragma warning(error:4777)     // format string type mismatch(how is this different from C4477???)
-#pragma warning(error:4778)     // unterminated format string
-
-#include <assert.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdint.h>
 #include <glut.h>
 #include <Windows.h>
+#include <kbt\kbt_common.h>
+#include <kbt\kbt_bitmap_font.h>
 #include "Load_Levels.txt"
-typedef unsigned int uint;
+
+// remove windows macros
 #undef min
 #undef max
+#undef DrawText
 
-#define ArrayCount(a) (sizeof(a) / sizeof((a)[0]))
-#define PrintErrorf(fmt, ...) do { fprintf(stderr, "%s line %d: " fmt, __FUNCTION__, __LINE__, __VA_ARGS__); DebugBreak(); }while(0)
-#define Assert(cond) if (!(cond)) PrintErrorf("assertion failed \"%s\"\n", #cond)
-#define Coerce(x, min, max) (x < min) ? min : (x > max) ? max : x;
-#define Malloc(type, count) (type *)malloc(count * sizeof(type))
-
-// opengl version >= 4.3 definitions
-#define GL_DEBUG_OUTPUT_SYNCHRONOUS 0x8242
-#define GL_DEBUG_OUTPUT 0x92E0
-
-#define GL_DEBUG_SOURCE_API 0x8246
-#define GL_DEBUG_SOURCE_WINDOW_SYSTEM 0x8247
-#define GL_DEBUG_SOURCE_SHADER_COMPILER 0x8248
-#define GL_DEBUG_SOURCE_THIRD_PARTY 0x8249
-#define GL_DEBUG_SOURCE_APPLICATION 0x824A
-#define GL_DEBUG_SOURCE_OTHER 0x824B
-
-#define GL_DEBUG_TYPE_ERROR 0x824C
-#define GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR 0x824D
-#define GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR 0x824E
-#define GL_DEBUG_TYPE_PORTABILITY 0x824F
-#define GL_DEBUG_TYPE_PERFORMANCE 0x8250
-#define GL_DEBUG_TYPE_OTHER 0x8251
-#define GL_DEBUG_TYPE_MARKER 0x8268
-#define GL_DEBUG_TYPE_PUSH_GROUP 0x8269
-#define GL_DEBUG_TYPE_POP_GROUP 0x826A
-
-#define GL_DEBUG_SEVERITY_HIGH 0x9146
-#define GL_DEBUG_SEVERITY_MEDIUM 0x9147
-#define GL_DEBUG_SEVERITY_LOW 0x9148
+void DrawText(const FONT *font, const char *text, int bx, int by, int color);
+void DrawText(BitmapFont *font, const char *text, int bx, int by, int color);
+PrintFn *const PrintImpl = [](const char *msg)
+{ 
+    fprintf(stdout, "%s", msg);
+    fflush(stdout);
+};
 
 #define res        1                        // 0=160x120 1=360x240 4=640x480
 #define SW         (160*res)                // screen width
@@ -85,18 +31,17 @@ typedef unsigned int uint;
 #define GLSW       (SW*PIXELSCALE)          // OpenGL window width
 #define GLSH       (SH*PIXELSCALE)          // OpenGL window height
 #define FRAMERATE  20
+#define FRAME_MS   (1000 / FRAMERATE)
 #define PI32       3.14159265359f
-#define MAX_WALLS        512
-#define MAX_SECTORS      512
 #define INTS_PER_SECTOR   6                 // how many ints per stored sector
 #define INTS_PER_WALL     5                 // how many ints per stored wall
+#define Coerce(x, min, max) ((x < min) ? min : (x > max) ? max : x)
 
 //------------------------------------------------------------------------------
 struct Time
 {
     int this_ms;
     int last_ms;
-    int fr1,fr2;           //frame 1 frame 2, to create constant frame rate
 };
 
 struct Keys
@@ -128,15 +73,24 @@ struct Wall
     V2 p1;          // bottom line point 1
     V2 p2;          // bottom line point 2
     uint c;         // color
-} walls[MAX_WALLS];
+};
+
+enum Surface
+{
+    Surface_None,
+    Surface_Below,
+    Surface_Above,
+};
 
 struct Sector
 {
-    uint ws, we;    // wall start index to end: [ws, we) 
-    int z1, z2;     // height of bottom and top
-    V2 p;           // center position of sector
-    int d;          // add y distances to sort draw order
-} sectors[MAX_SECTORS];
+    uint ws, we;        // wall start index to end: [ws, we) 
+    int z1, z2;         // height of bottom and top
+    int d;              // add y distances to sort draw order
+    int cb, ct;         // bottom and top surface colors
+    int surf[SW];       // points for the surface
+    Surface surface;    // what surface to draw
+};
 
 struct Math
 {
@@ -162,27 +116,29 @@ enum Color
     Color_Brown,
     Color_Brown_Darker,
     Color_Background,
+    Color_Black,
     Color_Count,
 };
 
 const RGB COLORS[Color_Count] = {
-   {255, 255,   0}, //Yellow	
-   {160, 160,   0}, //Yellow darker	
-   {  0, 255,   0}, //Green	
-   {  0, 160,   0}, //Green darker	
-   {  0, 255, 255}, //Cyan	
-   {  0, 160, 160}, //Cyan darker
-   {160, 100,   0}, //brown	
-   {110,  50,   0}, //brown darker
-   {  0,  60, 130}, //background 
+   {255, 255,   0}, // yellow	
+   {160, 160,   0}, // yellow darker	
+   {  0, 255,   0}, // green	
+   {  0, 160,   0}, // green darker	
+   {  0, 255, 255}, // cyan	
+   {  0, 160, 160}, // cyan darker
+   {160, 100,   0}, // brown	
+   {110,  50,   0}, // brown darker
+   {  0,  60, 130}, // background 
+   {  0,   0,   0}, // black
 };
 
-Keys keys;
 Time time;
+Keys keys;
 Player p;
 Math m;
-uint sector_count;
-uint wall_count;
+Vector<Wall> walls;
+Vector<Sector> sectors;
 
 void DrawPixel(int x, int y, uint c)
 {
@@ -250,7 +206,8 @@ int Distance(V2 p1, V2 p2)
     return sqrt(x*x + y*y);
 }
 
-void DrawWall(int x1, int x2, int b1, int b2, int t1, int t2, int c)
+void DrawWall(int x1, int x2, int b1, int b2, int t1, int t2, 
+              int c, Sector *s, bool acc)
 {
     // hold difference in distance
     int dyb = b2 - b1;
@@ -274,12 +231,32 @@ void DrawWall(int x1, int x2, int b1, int b2, int t1, int t2, int c)
         y1 = Coerce(y1, 1, SH - 1);
         y2 = Coerce(y2, 1, SH - 1);
 
-        for (int y = y1; y < y2; y++)
+        if (acc)
         {
-            DrawPixel(x, y, c);
+            // accumulate surface top/bottom values
+            // set the surf start based upon the furthest wall
+            if (s->surface == Surface_Below)
+                s->surf[x] = y1;
+            if (s->surface == Surface_Above)
+                s->surf[x] = y2;
+        }
+        else
+        {
+            // draw bottom surface
+            if (s->surface == Surface_Below)
+                for (int y = s->surf[x]; y < y1; y++)
+                    DrawPixel(x, y, Color_Green);
+
+            // draw top surface
+            if (s->surface == Surface_Above)
+                for (int y = y2; y < s->surf[x]; y++)
+                    DrawPixel(x, y, Color_Green);
+            
+            // draw walls
+            for (int y = y1; y < y2; y++)
+                DrawPixel(x, y, c);
         }
     }
-
 }
 
 void Draw3D()
@@ -287,21 +264,25 @@ void Draw3D()
     float CS = m.cos[p.a];
     float SN = m.sin[p.a];
 
-    // sort sectors for furthest away gets drawn first
+    // sort sectors descending from current distance to player
     const auto SortDistanceDescending = [](const void *a, const void *b) -> int
     {
         return ((Sector *)b)->d - ((Sector *)a)->d;
     };
 
-    qsort(sectors, sector_count, sizeof(Sector), SortDistanceDescending);
-    for (uint si = 0; si < sector_count; si++)
+    qsort(sectors.data(), sectors.size(), sizeof(Sector), SortDistanceDescending);
+    for (uint si = 0; si < sectors.size(); si++)
     {
         Sector *sector = &sectors[si];
+        if (p.z < sector->z1)       sector->surface = Surface_Below;
+        else if (p.z > sector->z1)  sector->surface = Surface_Above;
+        else                        sector->surface = Surface_None;
+
         for (uint side = 0; side < 2; side++)
         {
             for (uint wi = sector->ws; wi < sector->we; wi++)
             {
-                Assert(wi < wall_count);
+                Assert(wi < walls.size());
                 Wall *wall = &walls[wi];
                 V3 w0, w1, w2, w3;
                 w0 = w1 = w2 = w3 = {};
@@ -331,6 +312,7 @@ void Draw3D()
                 w1.y = y2 * CS + x2 * SN;
                 w2.y = w0.y;
                 w3.y = w1.y;
+
                 sector->d += Distance( {0,0}, {(w0.x + w1.x) / 2, (w0.y + w1.y) / 2});
 
                 // world z height
@@ -338,6 +320,11 @@ void Draw3D()
                 w1.z = sector->z1 - p.z + ((p.l * w1.y) / 32.0f);
                 w2.z = w0.z + sector->z2;
                 w3.z = w1.z + sector->z2;
+
+                V3 wp = {};
+                wp.x = (w0.x + w1.x) / 2;
+                wp.y = (w0.y + w1.y) / 2;
+                wp.z = (w0.z + w2.z) / 2;
 
                 if (w0.y < 1 && w1.y < 1) 
                 {
@@ -360,28 +347,39 @@ void Draw3D()
                 w2.x=w2.x*200/w2.y+SW2; w2.y=w2.z*200/w2.y+SH2;
                 w3.x=w3.x*200/w3.y+SW2; w3.y=w3.z*200/w3.y+SH2;
 
-                DrawWall(w0.x, w1.x, w0.y, w1.y, w2.y, w3.y, wall->c);
+                DrawWall(w0.x, w1.x, w0.y, w1.y, w2.y, w3.y, 
+                         wall->c, sector, side == 0);
             }
         }
 
         sector->d /= (sector->we - sector->ws);
     }
+
+    char buf[1024] = {};
+    tsnprintf(buf, "x: %d, y: %d, a: %d", p.x, p.y, p.a);
+
+
+    static BitmapFont bmpfont;
+    static bool ok = ParseBDF("ignore/tom-thumb.bdf", &bmpfont);
+    if (ok)
+        DrawText(&bmpfont, buf, 0, 0, Color_Green);
 }
 
 void Display() 
 {
-    if (time.this_ms - time.last_ms >= 1000 / FRAMERATE) //only draw 20 frames/second
-    { 
+    //glClear(GL_COLOR_BUFFER_BIT);
+    time.this_ms = glutGet(GLUT_ELAPSED_TIME);
+    if (time.this_ms - time.last_ms >= FRAME_MS)
+    {
         ClearBackground();
         Move();
         Draw3D(); 
 
-        time.last_ms = time.this_ms;
         glutSwapBuffers(); 
         glutReshapeWindow(GLSW,GLSH); // prevent window scaling
+        time.last_ms = time.this_ms;
     }
 
-    time.this_ms = glutGet(GLUT_ELAPSED_TIME); // 1000 Milliseconds per second
     glutPostRedisplay();
 } 
 
@@ -406,6 +404,203 @@ void KeysUp(unsigned char key,int x,int y)
     if (key=='q'){ keys.sl=0;}
 }
 
+// Doom testing -------------------------------------------------------
+struct Vertex
+{
+    int16_t x;
+    int16_t y;
+};
+
+struct Segment
+{
+    int16_t vertex_start;
+    int16_t vertex_end;
+    int16_t angle;
+    int16_t linedef_num;
+    int16_t direction;
+    int16_t offset;
+};
+
+struct LineDef
+{
+    int16_t vertex_start;
+    int16_t vertex_end;
+    int16_t flags;
+    int16_t special_type;
+    int16_t sector_tag;
+    int16_t front_sidedef;
+    int16_t back_sidedef;
+};
+
+#pragma pack(2)
+struct RSector // TODO: merge with tutorial Sector struct
+{
+    int16_t floor_height;
+    int16_t ceiling_height;
+    char    floor_texture_name[8];
+    char    ceiling_texture_name[8];
+    int16_t light_level;
+    int16_t special_type;
+    int16_t tag_number;
+
+    // calculated at load time
+    //int line_count;
+    //LineDef *lines;
+    //Vertex blockbox_BL;
+    //Vertex blockbox_TR;
+    //Vertex soundorg;
+};
+#pragma pack()
+
+
+struct Map
+{
+    Vector<Vertex> vertices;
+    Vector<LineDef> linedefs;
+    Vector<RSector> rsectors;
+};
+//------------------------------------------------------------------------------
+
+bool ReadMap(const char *wad_filename, Map *map)
+{
+    struct WadHeader
+    {
+        char magic[4];
+        uint32_t lump_count;
+        uint32_t directory_fpos;
+    };
+
+    struct LumpHeader
+    {
+        uint32_t data_fpos;
+        uint32_t byte_count;
+        char name[8];
+    };
+
+    bool result = false;
+    WadHeader wad_header = {};
+    MemorySpanIterator wad_file = {};
+    *map = {};
+
+    defer{ if (!result) *map = {}; };
+
+    if (!ReadAllocIterator(wad_filename, &wad_file))
+        return result;
+
+    defer{ DestroyIterator(&wad_file); };
+
+    ReadV(&wad_file, &wad_header);
+    if (0 != memcmp("IWAD", wad_header.magic, sizeof(wad_header.magic)) &&
+        0 != memcmp("PWAD", wad_header.magic, sizeof(wad_header.magic)))
+    {
+        Error("bad WAD magic number, got %.*s expected IWAD or PWAD",
+              sizeof(wad_header.magic), wad_header.magic);
+        return result;
+    }
+
+    // read in the lump headers within the directory section
+    MemorySpanIterator lump_dir = GetInnerSpan(&wad_file, wad_header.directory_fpos,
+                                               wad_header.lump_count * sizeof(LumpHeader));
+    if (!IsValidSpan(&lump_dir.span))
+        return result;
+
+    for (uint ihdr = 0;
+         ihdr < wad_header.lump_count;
+         ihdr++)
+    {
+        LumpHeader lump = {};
+        ReadV(&lump_dir, &lump);
+
+        // extend length for string comparisons
+        char lumpname[sizeof(lump.name) + 1] = {};
+        memcpy(lumpname, lump.name, sizeof(lump.name));
+
+        printf("lump %d: offset %d, bytes: %d, name: %.*s\n",
+               ihdr, lump.data_fpos, lump.byte_count,
+               sizeof(lump.name), lump.name);
+
+        // get the lump data span
+        MemorySpanIterator lump_data = GetInnerSpan(&wad_file, lump.data_fpos, lump.byte_count);
+        if (lump.byte_count != 0 && !IsValidSpan(&lump_data.span))
+            return result;
+
+        const auto IsMultiple = [&](uint itemsize) -> bool
+        {
+            // lump data is an array of an items
+            // make sure lump.bytecount is a multiple of bytes_per_item
+            bool is_multiple = (lump.byte_count % itemsize == 0);
+            if (!is_multiple)
+                Error("%s byte count is not a multiple of its itemsize", lumpname);
+
+            return is_multiple;
+        };
+
+        if (0 == strcmp(lumpname, "LINEDEFS"))
+        {
+            if (!IsMultiple(sizeof(LineDef)))
+                return result;
+
+            uint linedef_count = lump.byte_count / sizeof(LineDef);
+            map->linedefs.resize(linedef_count);
+            ReadN(&lump_data, map->linedefs.data(), lump.byte_count);
+
+            for (uint iline = 0; iline < linedef_count; iline++)
+            {
+                LineDef *def = &map->linedefs[iline];
+                printf("[%d, %d) sector tag %d\n",
+                       def->vertex_start, def->vertex_end,
+                       def->sector_tag);
+            }
+        }
+        else if (0 == strcmp(lumpname, "SIDEDEFS"))
+        {
+            // texture info
+        }
+        else if (0 == strcmp(lumpname, "VERTEXES"))
+        {
+            if (!IsMultiple(sizeof(Vertex)))
+                return result;
+
+            uint count = lump.byte_count / sizeof(Vertex);
+            map->vertices.resize(count);
+            ReadN(&lump_data, map->vertices.data(), lump.byte_count);
+        }
+        else if (0 == strcmp(lumpname, "SEGS"))
+        {
+            if (!IsMultiple(sizeof(Segment)))
+                return result;
+        }
+        else if (0 == strcmp(lumpname, "SSECTORS"))
+        {
+
+        }
+        else if (0 == strcmp(lumpname, "SECTORS"))
+        {
+            const uint RSECTOR_FILE_SIZE = 26;
+            if (!IsMultiple(RSECTOR_FILE_SIZE))
+                return result;
+            
+            uint rsector_count = (lump.byte_count / RSECTOR_FILE_SIZE);
+            map->rsectors.resize(rsector_count);
+            for (uint isec = 0; isec < rsector_count; isec++)
+            {
+                ReadN(&lump_data, map->rsectors.data() + isec, RSECTOR_FILE_SIZE);
+                RSector *rs = &map->rsectors[isec];
+                printf("  floor height: %d, ceiling height: %d, floor name: %.*s, ceiling name %.*s tag %d\n",
+                       rs->floor_height, rs->ceiling_height,
+                       sizeof(rs->floor_texture_name), rs->floor_texture_name,
+                       sizeof(rs->ceiling_texture_name), rs->ceiling_texture_name,
+                       rs->tag_number);
+            }
+        }
+    }
+
+    result = true;
+    return result;
+}
+
+// Doom testing -------------------------------------------------------
+
 void APIENTRY DebugOpenGL(GLenum gl_source, 
                           GLenum gl_type, 
                           GLuint gl_id, 
@@ -414,6 +609,28 @@ void APIENTRY DebugOpenGL(GLenum gl_source,
                           const char *gl_message,
                           const void *user_param) 
 {
+    const int GL_DEBUG_SOURCE_API = 0x8246;
+    const int GL_DEBUG_SOURCE_WINDOW_SYSTEM = 0x8247;
+    const int GL_DEBUG_SOURCE_SHADER_COMPILER = 0x8248;
+    const int GL_DEBUG_SOURCE_THIRD_PARTY = 0x8249;
+    const int GL_DEBUG_SOURCE_APPLICATION = 0x824A;
+    const int GL_DEBUG_SOURCE_OTHER = 0x824B;
+              
+    const int GL_DEBUG_TYPE_ERROR = 0x824C;
+    const int GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR = 0x824D;
+    const int GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
+    const int GL_DEBUG_TYPE_PORTABILITY = 0x824F;
+    const int GL_DEBUG_TYPE_PERFORMANCE = 0x8250;
+    const int GL_DEBUG_TYPE_OTHER = 0x8251;
+    const int GL_DEBUG_TYPE_MARKER = 0x8268;
+    const int GL_DEBUG_TYPE_PUSH_GROUP = 0x8269;
+    const int GL_DEBUG_TYPE_POP_GROUP = 0x826A;
+              
+    const int GL_DEBUG_SEVERITY_HIGH = 0x9146;
+    const int GL_DEBUG_SEVERITY_MEDIUM = 0x9147;
+    const int GL_DEBUG_SEVERITY_LOW = 0x9148;
+
+
     const char *source;
     switch (gl_source) {
     case GL_DEBUG_SOURCE_API:
@@ -457,7 +674,7 @@ void APIENTRY DebugOpenGL(GLenum gl_source,
 
     if (gl_severity == GL_DEBUG_SEVERITY_HIGH)
     {
-        PrintErrorf("glDebugCallback Called\n"
+        Error("glDebugCallback Called\n"
                     "  severity: %s\n"
                     "  source: %s\n" 
                     "  type: %s\n"
@@ -475,34 +692,12 @@ void APIENTRY DebugOpenGL(GLenum gl_source,
     }
 }
 
-typedef void *GETPROCFN(const char *);
-typedef void APIENTRY GLDEBUGPROC(GLenum source,GLenum type,GLuint id,GLenum severity,GLsizei Length,const char *message,const void *userParam);
-typedef void APIENTRY GLCALLBACKFN(GLDEBUGPROC *callback, const void *userParam);
-typedef void APIENTRY GLCONTROLFN(GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled);
-HMODULE libGL;
-GETPROCFN *wglGetProc;
-
-void *GetProc(const char *name) 
-{
-    void *result = NULL;
-    if (libGL != NULL)
-    {
-        if (wglGetProc != NULL)
-        {
-            result = (void *)wglGetProc(name); 
-        }
-
-        if (result == NULL)
-        {
-            result = (void*)GetProcAddress(libGL, name);
-        }
-    }
-
-    return result;
-}
-
 int main(int argc, char* argv[])
 {
+    //extern void BitmapFontTest();
+    //BitmapFontTest();
+
+    //return 0;
     const auto ExitCallback = [](int code)
     {
         if (code == EXIT_FAILURE) 
@@ -543,58 +738,47 @@ int main(int argc, char* argv[])
         Assert(sec_int_count % INTS_PER_SECTOR == 0);
         for (uint i = 0; i < sec_int_count; i += INTS_PER_SECTOR)
         {
-            if (sector_count >= MAX_SECTORS)
-            {
-                PrintErrorf("exceeded sector capacity\n");
-                exit(1);
-            }
+            Sector tmp = {};
+            tmp.ws = sec[i + 0];
+            tmp.we = sec[i + 1];
+            tmp.z1 = sec[i + 2];
+            tmp.z2 = sec[i + 3];
+            tmp.cb = sec[i + 4];
+            tmp.ct = sec[i + 5];
 
-            Sector *s = &sectors[sector_count++];
-            s->ws = sec[i + 0];
-            s->we = sec[i + 1];
-            s->z1 = sec[i + 2];
-            s->z2 = sec[i + 3];
-            s->p.x = sec[i + 4];
-            s->p.y = sec[i + 5];
-
-            bool good_sector = (s->ws < s->we);
-            if (!good_sector)
-            {
-                PrintErrorf("bad sector at index: %d\n", i / INTS_PER_SECTOR);
-                exit(1);
-            }
+            Assert(tmp.ws < tmp.we);
+            Assert(tmp.cb < Color_Count);
+            Assert(tmp.ct < Color_Count);
+            sectors.push_back(tmp);
         }
 
         // load in walls
         Assert(wall_int_count % INTS_PER_WALL == 0);
         for (uint i = 0; i < wall_int_count; i += INTS_PER_WALL)
         {
-            if (wall_count >= MAX_WALLS)
-            {
-                PrintErrorf("exceeded wall capacity\n");
-                exit(1);
-            }
+            Wall tmp = {};
+            tmp.p1.x = wall[i + 0];
+            tmp.p1.y = wall[i + 1];
+            tmp.p2.x = wall[i + 2];
+            tmp.p2.y = wall[i + 3];
+            tmp.c = wall[i + 4];
 
-            Wall *w = &walls[wall_count++];
-            w->p1.x = wall[i + 0];
-            w->p1.y = wall[i + 1];
-            w->p2.x = wall[i + 2];
-            w->p2.y = wall[i + 3];
-            w->c = wall[i + 4];
-
-            bool good_wall = (w->c >= 0 && w->c < Color_Count);
-            if (!good_wall)
-            {
-                PrintErrorf("bad wall at index: %d\n", i / INTS_PER_WALL);
-                exit(1);
-            }
+            Assert(tmp.c >= 0 && tmp.c < Color_Count);
+            walls.push_back(tmp);
         }
 
-        sector_count = 0;
-        wall_count = 0;
+    }
+
+    // maze testing
+    //if (0)
+    {
+        walls.clear();
+        sectors.clear();
         const int DIM = 64;     // floor square width/height
         const auto PushBoxSector = [&](V2 st, int c, int h)
         {
+            Assert(c <= Color_Count);
+
             // add a sector with 4 walls
             V2 pts[4] = 
             {
@@ -604,36 +788,62 @@ int main(int argc, char* argv[])
                 {st.x,        st.y + DIM},
             };
 
-            Assert(wall_count + 4 <= MAX_WALLS);
-            Wall *w = &walls[wall_count];
+            size_t wall_start = walls.size();
+            walls.resize(wall_start + 4);
+            Wall *w = &walls[wall_start];
             w[0].p1 = pts[0]; w[0].p2 = pts[1]; w[0].c = c;
             w[1].p1 = pts[1]; w[1].p2 = pts[2]; w[1].c = c;
             w[2].p1 = pts[2]; w[2].p2 = pts[3]; w[2].c = c;
             w[3].p1 = pts[3]; w[3].p2 = pts[0]; w[3].c = c;
 
-            Assert(sector_count + 1 <= MAX_SECTORS);
-            Sector *s = &sectors[sector_count];
-            s->ws = wall_count;
-            s->we = s->ws + 4;
-            s->z1 = 0;
-            s->z2 = h;
-            s->p = {};  //unused
-            s->d = 0;
-
-            sector_count += 1;
-            wall_count += 4;
+            Sector s = {};
+            s.ws = wall_start;
+            s.we = s.ws + 4;
+            s.z1 = 0;
+            s.z2 = h;
+            s.cb = c;
+            s.ct = c;
+            s.d = 0;
+            sectors.push_back(s);
         };
 
         // create sectors from a string definition
         // any non-space character is a wall for now
         // top left is (0,0), down is +y, right is +x
         const char *maze = 
-        "#######"
-        "   #   "
-        "#  #  #"
-        "#     #"
-        "#######";
-        const int COLUMN_COUNT = 7;
+        "################################"
+        "# #    ###  ####   ###  ## #  ##"
+        "# ####     #   # #  #  ### ## ##"
+        "###  # ### ### # ##      #    ##"
+        "# # ## ##      # #  #### ## #  #"
+        "#   #     ###  # # ##     # ## #"
+        "###   ########   #  ####### ## #"
+        "#####        ###          #    #"
+        "#     ## # #    ######### ## ###"
+        "### # #  # #### ##           # #"
+        "#   # #          # ####  ### ###"
+        "## ## ####### ## #       #    ##"
+        "##  #     #   #    ##### ## ####"
+        "##    ### # # # ##     #    ## #"
+        "## #      # ### # # #  # ##    #"
+        "## ########     # # ## # #######"
+        "##           #  # #  # #      ##"
+        "#  ## ##  ## #    #    #### ## #"
+        "#  ## ## ### ### ##### #     # #"
+        "# #   #  ##  #   #       ### # #"
+        "# # # # #   ## #   #####   #####"
+        "##### ### #    ###     ###    ##"
+        "#         #### #   ##    # ##  #"
+        "# #  ####    # # ###  ####  # ##"
+        "# ##  # # #  ### #   ##     # ##"
+        "#  ## #   ##     #      ##### ##"
+        "##  #   #  ### # # ####        #"
+        "##### # # #    # # ####  #######"
+        "#     ### # #### #            ##"
+        "#  ###      # #    ########## ##"
+        "## # # ###### # ##    #  # #####"
+        "################################";
+        const int COLUMN_COUNT = 32;
         const int ROW_COUNT = strlen(maze) / COLUMN_COUNT;
         for (int r = 0; r < ROW_COUNT; r++)
         {
@@ -677,28 +887,45 @@ int main(int argc, char* argv[])
     const char *version = (const char *)glGetString(GL_VERSION);
     if (version)
     {
+        typedef void *WGLGETPROC(const char *);
+        typedef void APIENTRY GLDEBUGPROC(GLenum source,GLenum type,GLuint id,GLenum severity,GLsizei Length,const char *message,const void *userParam);
+        typedef void APIENTRY GLCALLBACKPROC(GLDEBUGPROC *callback, const void *userParam);
+        typedef void APIENTRY GLCONTROLPROC(GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled);
+        typedef BOOL WINAPI WGLSWAPINTERVALEXTPROC(int interval);
+        typedef int WINAPI WGLGETSWAPINTERVALEXTPROC(void);
+
         int major = 0;
         int minor = 0;
         if (2 == sscanf(version, "%d.%d", &major, &minor) &&
             major >= 4 && minor >= 3)
         {
-            libGL = LoadLibraryW(L"opengl32.dll");
-            if (libGL != NULL) 
-            {
-                atexit([](){ FreeLibrary(libGL); libGL = NULL; });
-                wglGetProc = (GETPROCFN *)GetProcAddress(libGL, "wglGetProcAddress");
-                if (!wglGetProc)
-                {
-                    PrintErrorf("error getting wglGetProcAddress\n");
-                }
-            }
-            else
-            {
-                PrintErrorf("error in LoadLibraryW opengl32.dll");
-            }
+            static HMODULE libGL = LoadLibraryW(L"opengl32.dll");
+            if (!libGL) Fatal("LoadLibraryW %s", ErrorWin32());
+            atexit([](){ FreeLibrary(libGL); libGL = 0; });
 
-            GLCALLBACKFN *glDebugMessageCallback = (GLCALLBACKFN *)GetProc("glDebugMessageCallback");
-            GLCONTROLFN *glDebugMessageControl = (GLCONTROLFN *)GetProc("glDebugMessageControl");
+            WGLGETPROC *wglGetProc = (WGLGETPROC *)GetProcAddress(libGL, "wglGetProcAddress");
+            if (!wglGetProc) Fatal("GetProcAddress %s", ErrorWin32());
+
+            const auto GetProc = [=](const char *name) -> void *
+            {
+                void *result = (void *)wglGetProc(name); 
+
+                if (result == NULL)
+                    result = (void *)GetProcAddress(libGL, name);
+
+                if (result == NULL)
+                    Fatal("opengl function not found: %s", name);
+
+                return result;
+            };
+
+            const int GL_DEBUG_OUTPUT_SYNCHRONOUS = 0x8242;
+            const int GL_DEBUG_OUTPUT = 0x92E0;
+
+            GLCALLBACKPROC *glDebugMessageCallback = (GLCALLBACKPROC *)GetProc("glDebugMessageCallback");
+            GLCONTROLPROC *glDebugMessageControl = (GLCONTROLPROC *)GetProc("glDebugMessageControl");
+            //WGLSWAPINTERVALEXTPROC *wglSwapIntervalEXT = (WGLSWAPINTERVALEXTPROC *) GetProc("wglSwapIntervalEXT");
+            //WGLGETSWAPINTERVALEXTPROC *wglGetSwapIntervalEXT = (WGLGETSWAPINTERVALEXTPROC *) GetProc("wglGetSwapIntervalEXT");
 
             glEnable(GL_DEBUG_OUTPUT);
             glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -715,4 +942,104 @@ int main(int argc, char* argv[])
     //glutPassiveMotionFunc();      // mouse motion while no buttons down
     glutMainLoop();
     return 0;
-} 
+}
+
+// (0,0) is bottom left, newline advances upwards`
+void DrawText(BitmapFont *font, const char *text, int bx, int by, int color)
+{
+    int x = bx;
+    int y = by;
+    for (const char *iter = text;
+         iter && *iter;
+         iter++)
+    {
+        uint8 c = (uint8)*iter;
+        if (c == '\n')
+        {
+            x = bx;
+            y += font->height;
+        }
+
+        uint ibit = 0;
+        BitmapFont::Char *ch = &font->ascii[c];
+        uint8 *base = &font->data[ch->offset_to_data];
+        for (uint row = 0; row < ch->height; row++)
+        {
+            for (uint col = 0; col < ch->width; col++)
+            {
+                uint flag = (1 << (7 - (ibit % 8)));
+                if (base[ibit / 8] & flag)
+                    DrawPixel(ch->offset_x + x + col,
+                              ch->offset_y + y + (ch->height - row),
+                              color);
+
+                ibit += 1;
+            }
+
+            ibit = Align(ibit, 8);
+        }
+
+        x += ch->nextx;
+        y += ch->nexty;
+    }
+}
+
+void DrawText(const FONT *font, const char *text, int bx, int by, int color)
+{
+    const FONTINFO *info = &font->header;
+
+    // dfBitsOffset relative to fpos 0, FONT::data is data after header
+    size_t glyph_base = info->dfBitsOffset - sizeof(FONTINFO);  
+    int pixel_byte_width = (info->dfPixWidth + 7) / 8; // round up byte alignment
+    size_t bytes_per_char = info->dfPixHeight * pixel_byte_width;
+    size_t pixel_stride = info->dfPixHeight * info->dfPixWidth;
+
+    int x = bx;
+    int y = by;
+    for (const char *iter = text;
+         iter && *iter;
+         iter++)
+    {
+        uint8 c = (uint8)*iter;
+        if (c == '\n')
+        {
+            x = bx;
+            y += info->dfPixHeight;
+        }
+
+        uint offset = (c >= info->dfFirstChar && c <= info->dfLastChar)
+                      ? c - info->dfFirstChar : info->dfDefaultChar - info->dfFirstChar;
+
+        size_t glyph_offset = glyph_base + bytes_per_char * offset;
+        for (size_t j = 0; j < bytes_per_char; j++)
+        {
+            uint64 pixcol = (j / info->dfPixHeight) * 8;
+            uint64 pixrow = (j % info->dfPixHeight);
+
+            Assert(glyph_offset < font->data.num_bytes);
+            uint8 byte = font->data.bytes[ glyph_offset++ ];
+            uint64 bit_iter = pixcol;
+
+            for (int bit = 0; bit < 8; bit++)
+            {
+                if (bit_iter < info->dfPixWidth)
+                {
+                    // (0,0) is bottom left so needs to flip drawing pixels
+                    int dc = ((0x80 & byte) != 0) ? color : Color_Black;
+                    DrawPixel(x + bit_iter, y + (info->dfPixHeight - pixrow), dc);
+
+                    bit_iter += 1;
+                    byte <<= 1;
+                }
+
+            }
+        }
+
+        x += info->dfPixWidth;
+    }
+}
+
+
+// KBT impl
+#include <kbt\kbt_win32.cpp>
+#include <kbt\kbt_bitmap_font.cpp>

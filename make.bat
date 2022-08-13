@@ -11,8 +11,8 @@ set EXE=output\app.exe
 set SRC=src\main.cpp
 set LIBS=winmm.lib user32.lib gdi32.lib opengl32.lib glu32.lib glut\Win32_2010\Debug\glutstatic.lib 
 
-if "%1"=="bar" (
-    rem build-and-run: build then run if it was successful
+if "%1"=="run" (
+    rem build then run if it was successful
     rem NB: "call" is needed to shortcircuit on fail within make.bat
     call make.bat && %EXE% 
 )
@@ -34,7 +34,8 @@ if "%1"=="" (
         msbuild.exe glut\glut_2010.vcxproj /p:Configuration=Debug /p:Platform=X86 /m
     )
 
-    cl.exe -fsanitize=address -EHsc -MTd -W4 -MP -Zi -Od -Ob2 %SRC% -I..\KBT\third-party\ -Iglut\include\GL -Fd.\intermediate\ -Fo.\intermediate\ -Fe%EXE% -link %LIBS%
+    rem -fsanitize=address -EHsc 
+    cl.exe -MTd -W4 -MP -Zi -Od -Ob2 %SRC% -I..\KBT\third-party\ -Iglut\include\GL -Fd.\intermediate\ -Fo.\intermediate\ -Fe%EXE% -link %LIBS%
 )
 
 if "%1"=="debug" (
