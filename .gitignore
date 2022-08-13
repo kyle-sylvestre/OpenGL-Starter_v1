@@ -11,4 +11,6 @@
 *.opendb
 *.ipch
 tags
-TODO.txt
+ignore
+*.FileListAbsolute.txt
+*recipe
